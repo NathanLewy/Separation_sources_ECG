@@ -6,6 +6,7 @@ import struct
 from sklearn.decomposition import PCA
 from scipy.signal import find_peaks
 import wfdb
+import re
 
 # Choose simulation
 '''
@@ -31,10 +32,12 @@ channels 1 to 32 are the abdominal FECG channels
 channels 33 to 34 are the maternal reference ECG channels.
 '''
 
-XX  = '01'
+XX  = f'0{np.random.randint(1,9)}'
 YY = '09'
-Z = '4'
-WW = 'c1'
+Z = f'{np.random.randint(1,5)}'
+WW = f'c{np.random.randint(1,5)}'
+print(XX, Z, WW)
+
 
 def extract_signal(xx, yy, z, ww, vvvv):
     try:
@@ -64,7 +67,25 @@ def extract_qrs(xx, yy, z, ww, vvvv):
 
         return record.sample
 
+def extract_hr(xx, yy, z, ww, vvvv):
+        if ww == '':
+            filename = 'sub'+xx+'_snr'+yy+'dB_l'+z+'_'+vvvv
+        else:   
+            filename = 'sub'+xx+'_snr'+yy+'dB_l'+z+'_'+ww+'_'+vvvv
+        filename = filename
+        os.chdir('D:\\datacset_ecg\\fetal-ecg-synthetic-database-1.0.0' + '\\sub'+xx+'\\snr'+yy+'dB')
+        filepath = os.getcwd()+'\\'+filename+'.hea'
 
+        with open(filepath, 'r') as file:  # 'r' pour mode lecture
+            data = file.read()
+            fhr_match = re.search(r'#fhr:([-\d.]+)', data)
+            mhr_match = re.search(r'#mhr:([-\d.]+)', data)
+        # Afficher les premières annotations
+        if fhr_match:
+            return (fhr_match.group(1), mhr_match.group(1))
+        else:
+            return (0,0)
+        
 
 
 
@@ -76,21 +97,23 @@ data_noisem = extract_signal(XX, YY, Z, WW, 'noise1')
 data_noisef = extract_signal(XX, YY, Z, WW, 'noise2')
 qrs_m = extract_qrs(XX, YY, Z, WW, 'mecg')
 qrs_f = extract_qrs(XX, YY, Z, WW, 'fecg1')
+fhr, mhr = extract_hr(XX, YY, Z, WW, 'fecg1')
 data = data_fecg + data_mecg + data_noisem +data_noisef
 if len(data_fecg_twin)>0:
     data+=data_fecg_twin
     qrs_f2 = extract_qrs(XX, YY, Z, WW, 'fecg2')
 
-data=data[100:]
 
 #signal to process
 f_ech = 250 #Hz
-T = 100 #s
+T = 30 #durée de fenetre en secondes
+T0 = 15 #début de l'analyse en secondes
 N_ech = f_ech*T
 N_signaux = 34
 signals=[]
-qrs_m = [i for i in qrs_m if i/f_ech < T]
-qrs_f = [i for i in qrs_f if i/f_ech < T]
+data=data[34*int(T0*f_ech):]
+qrs_m = [int(i-T0*f_ech) for i in qrs_m if T0 < i/f_ech < T + T0]
+qrs_f = [int(i-T0*f_ech) for i in qrs_f if T0 < i/f_ech < T + T0]
 for i in range(N_signaux):
     signal_i = data[i::34][:N_ech]
     signals.append((signal_i-np.mean(signal_i))/np.std(signal_i,ddof=1))
@@ -99,8 +122,8 @@ signals_matrix = np.array(signals)
 
 
 #parameters
-min_heartrate = 75 #bpm
-max_heartrate = 160 #bpm
+min_heartrate = 50 #bpm
+max_heartrate = 170 #bpm
 min_period = int(f_ech * 60/max_heartrate)
 max_period = int(f_ech * 60/min_heartrate)
 
@@ -137,29 +160,40 @@ plt.show()
 
 
 
-def bt_estimator(signal, min_period, max_period):
+def bartlett_estimator(signal, min_period, max_period):
     """Calcule les coefficients de corrélation selon l'estimateur de Bartlett."""
     autocorr=[]
     for k in range(min_period,max_period):
         autocorr.append(np.sum(signal[k:]*signal[:-k])/(len(signal)-k))
     return (np.arange(min_period,max_period),np.array(autocorr))
 
+def bt_estimator(signal, min_period, max_period):
+    """Calcule les coefficients de corrélation selon l'estimateur de Bartlett."""
+    autocorr=[]
+    for k in range(min_period,max_period):
+        autocorr.append(np.sum(signal[k:]*signal[:-k])/(len(signal)))
+    return (np.arange(min_period,max_period),np.array(autocorr))
 
 
+print(f'frequence de la mere: {mhr} bpm')
+print(f'frequence du foetus: {fhr} bpm')
 list_peaks=[]
 
 for i in range(n_pca):
     current_signal = signals_pca[:,i].T/signals_pca[:,i].T[np.argmax(np.abs(signals_pca[:,i].T))]
     x,autocorr = bt_estimator(current_signal, min_period, max_period)
-    peak_autocorr = np.argmax(autocorr)
-    period_main = x[peak_autocorr]
+    peaks_autocorr, _ = find_peaks(autocorr, prominence=np.max(autocorr)*0.9)
+    if len(peaks_autocorr)==0:
+        peaks_autocorr=[np.argmax(autocorr)]
+    period_main = x[peaks_autocorr[0]]
     plt.figure(2)
     plt.subplot(n_pca,1,i+1)
     plt.plot(x, autocorr, color='blue',label = f'autocorrélation du composant n°{i+1}')
-    plt.scatter(x[peak_autocorr], autocorr[peak_autocorr], color='red', label = f'pic du composant n°{i+1}', marker = 'o')
-    print(1/((period_main/f_ech)/60))
+    plt.scatter(x[peaks_autocorr], autocorr[peaks_autocorr], color='green', label = f'pic du composant n°{i+1}', marker = 'o')
+    plt.legend()
+    print(f'frequence de la composante n° {i+1}: {1/((period_main/f_ech)/60)} bpm')
 
-    peaks_signal, _ = find_peaks(current_signal, distance = int(period_main*0.8), prominence=np.max(current_signal)*0.5)
+    peaks_signal, _ = find_peaks(current_signal, distance = int(period_main*0.8), prominence=0.45)
     list_peaks.append(peaks_signal)
 
     #composantes principales
@@ -167,15 +201,16 @@ for i in range(n_pca):
     plt.subplot(n_pca,1,i+1)
     plt.plot(current_signal, label=f"composant principal n: "+str(i), color='b')
     plt.scatter(peaks_signal, current_signal[peaks_signal], label=f"composant principal n: "+str(i),  marker='+', color='r')
+    plt.legend()
 
-plt.legend()
+
 plt.tight_layout()
 plt.show()
 
 
-interesting_channels=[0,2,5,16,33,1, 7 ,24]
+interesting_channels=[0, 2, 5, 16, 33, 1, 7, 24, 29, 14]
 for c in interesting_channels:
-    plt.plot(signals_matrix[c],label='signal d origine', color='black', alpha=0.7/len(interesting_channels))
+    plt.plot(signals_matrix[c],label='signal d origine', color='black', alpha=0.6/len(interesting_channels))
 for i,p in enumerate(list_peaks):
     plt.vlines(p, 0, signals_matrix[i,:][p], label=f"pics n: "+str(i), linewidth=1, color='black')
 plt.vlines(qrs_m, 0, signals_matrix[i, qrs_m], color='red', linewidth=1, label='pics réels mere', linestyles='--')
