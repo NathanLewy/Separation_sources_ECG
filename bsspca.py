@@ -174,6 +174,9 @@ def bt_estimator(signal, min_period, max_period):
         autocorr.append(np.sum(signal[k:]*signal[:-k])/(len(signal)))
     return (np.arange(min_period,max_period),np.array(autocorr))
 
+def are_close(A,B):
+    return np.sum([np.min([np.abs(a-b) for b in B]) for a in A])/np.sqrt(len(A)*len(B))
+
 
 print(f'frequence de la mere: {mhr} bpm')
 print(f'frequence du foetus: {fhr} bpm')
@@ -182,7 +185,7 @@ list_peaks=[]
 for i in range(n_pca):
     current_signal = signals_pca[:,i].T/signals_pca[:,i].T[np.argmax(np.abs(signals_pca[:,i].T))]
     x,autocorr = bt_estimator(current_signal, min_period, max_period)
-    peaks_autocorr, _ = find_peaks(autocorr, prominence=np.max(autocorr)*0.9)
+    peaks_autocorr, _ = find_peaks(autocorr, prominence=np.max(autocorr)*0.5)
     if len(peaks_autocorr)==0:
         peaks_autocorr=[np.argmax(autocorr)]
     period_main = x[peaks_autocorr[0]]
@@ -191,7 +194,7 @@ for i in range(n_pca):
     plt.plot(x, autocorr, color='blue',label = f'autocorrélation du composant n°{i+1}')
     plt.scatter(x[peaks_autocorr], autocorr[peaks_autocorr], color='green', label = f'pic du composant n°{i+1}', marker = 'o')
     plt.legend()
-    print(f'frequence de la composante n° {i+1}: {1/((period_main/f_ech)/60)} bpm')
+    print(f'frequence a priori de la composante n° {i+1}: {1/((period_main/f_ech)/60)} bpm')
 
     peaks_signal, _ = find_peaks(current_signal, distance = int(period_main*0.8), prominence=0.45)
     list_peaks.append(peaks_signal)
@@ -208,13 +211,54 @@ plt.tight_layout()
 plt.show()
 
 
+d01 = are_close(list_peaks[0],list_peaks[1])
+d02 = are_close(list_peaks[0],list_peaks[2])
+d12 = are_close(list_peaks[0],list_peaks[2])
+
+found_ecg_m = list_peaks[0]
+if d01>d12: 
+    found_ecg_f = list_peaks[1]
+    print('took component 2')
+else:
+    if d02>d01:
+        found_ecg_f = list_peaks[2]
+        print('took component 3')
+    else:
+        found_ecg_f = list_peaks[1]
+        print('took component 2')
+
 interesting_channels=[0, 2, 5, 16, 33, 1, 7, 24, 29, 14]
 for c in interesting_channels:
     plt.plot(signals_matrix[c],label='signal d origine', color='black', alpha=0.6/len(interesting_channels))
-for i,p in enumerate(list_peaks):
-    plt.vlines(p, 0, signals_matrix[i,:][p], label=f"pics n: "+str(i), linewidth=1, color='black')
+
+plt.vlines(found_ecg_m, 0, signals_matrix[i,:][found_ecg_m], label=f"pics n: "+str(i), linewidth=1, color='black')
+plt.vlines(found_ecg_f, 0, signals_matrix[i,:][found_ecg_f], label=f"pics n: "+str(i), linewidth=1, color='black')
 plt.vlines(qrs_m, 0, signals_matrix[i, qrs_m], color='red', linewidth=1, label='pics réels mere', linestyles='--')
 plt.vlines(qrs_f, 0, signals_matrix[i, qrs_f], color='blue', linewidth=1, label='pics réels foetus', linestyles='--')
 plt.legend()
 plt.show()
 
+
+def classif_report(predicted, real, margin, sr):
+    tolerance = int(margin * sr)
+    fp = 0
+    tp = 0
+    fn = 0
+    for p in predicted:
+        if np.min([np.abs(p-r) for r in real])<=tolerance:
+            tp+=1
+        else:
+            fp+=1
+    for r in real:
+        if np.min([np.abs(p-r) for p in predicted])>tolerance:
+            fn += 1
+    sensitivity = tp/(fn + tp)
+    positive_predictive_value = tp/(fp + tp)
+    f1_score = 2*(positive_predictive_value * sensitivity)/(positive_predictive_value + sensitivity)
+    return sensitivity, positive_predictive_value, f1_score
+
+
+margin_m = 0.15 #s
+margin_f = 0.05 #s
+print(classif_report(found_ecg_m,qrs_m, margin_m, f_ech))
+print(classif_report(found_ecg_f,qrs_f, margin_f, f_ech))
