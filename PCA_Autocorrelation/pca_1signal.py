@@ -32,12 +32,6 @@ channels 1 to 32 are the abdominal FECG channels
 channels 33 to 34 are the maternal reference ECG channels.
 '''
 
-XX  = f'0{np.random.randint(1,9)}'
-YY = '09'
-Z = f'{np.random.randint(1,5)}'
-WW = f'c{np.random.randint(1,5)}'
-print(XX, Z, WW)
-
 
 def extract_signal(xx, yy, z, ww, vvvv):
     try:
@@ -87,9 +81,41 @@ def extract_hr(xx, yy, z, ww, vvvv):
             return (0,0)
         
 
+def classif_report(predicted, real, margin, sr):
+    tolerance = int(margin * sr)
+    fp = 0
+    tp = 0
+    fn = 0
+    for p in predicted:
+        if np.min([np.abs(p-r) for r in real])<=tolerance:
+            tp+=1
+        else:
+            fp+=1
+    for r in real:
+        if np.min([np.abs(p-r) for p in predicted])>tolerance:
+            fn += 1
+    sensitivity = tp/(fn + tp)
+    positive_predictive_value = tp/(fp + tp)
+    f1_score = 2*(positive_predictive_value * sensitivity)/(positive_predictive_value + sensitivity)
+    return sensitivity, positive_predictive_value, f1_score
+
+
+def bartlett_estimator(signal, min_period, max_period):
+    """Calcule les coefficients de corrélation selon l'estimateur de Bartlett."""
+    autocorr=[]
+    for k in range(min_period,max_period):
+        autocorr.append(np.sum(signal[k:]*signal[:-k])/(len(signal)))
+    return (np.arange(min_period,max_period),np.array(autocorr))
+
 
 
 # Load data
+XX  = f'0{np.random.randint(1,10)}'
+YY = '03'
+Z = f'{np.random.randint(1,5)}'
+WW = f'c0'
+print(f'extrait de l\'echantillon : {XX, Z, WW}')
+
 data_fecg = extract_signal(XX, YY, Z, WW, 'fecg1')
 data_fecg_twin = extract_signal(XX, YY, Z, WW, 'fecg2')
 data_mecg = extract_signal(XX, YY, Z, WW, 'mecg')
@@ -124,6 +150,8 @@ signals_matrix = np.array(signals)
 #parameters
 min_heartrate = 50 #bpm
 max_heartrate = 170 #bpm
+margin_m = 0.15 #s
+margin_f = 0.05 #s
 min_period = int(f_ech * 60/max_heartrate)
 max_period = int(f_ech * 60/min_heartrate)
 
@@ -132,133 +160,94 @@ max_period = int(f_ech * 60/min_heartrate)
 # Apply PCA for BSS
 n_pca = 3
 pca = PCA(n_components=n_pca)
-signals_pca = pca.fit_transform(signals_matrix.T)  # Transpose to have signals as rows
-
-# Reconstruct the separated signals from the PCA components
+signals_pca = pca.fit_transform(signals_matrix.T)
 reconstructed_signals = pca.inverse_transform(signals_pca).T
 
-# Plot original and separated signals
+# Plot original and PCA signals
 plt.figure()
-
-# Plot original mixed signals (first 5 signals)
 plt.subplot(2, 1, 1)
 for i in range(34):
     plt.plot(signals_matrix[i], label=f"Original Signal {i+1}")
 plt.title("Original Mixed Signals")
+plt.xlabel('indice de la mesure')
+plt.ylabel('amplitude d\'ECG')
 
-
-# Plot separated signals using PCA (first 5 components)
 plt.subplot(2, 1, 2)
-
-plt.plot(signals_pca, label=f"Separated Signal")
+for i in range(n_pca):
+    plt.plot(signals_pca[:,i], label=f"Separated Signal {i}")
 plt.title("Separated Signals using PCA")
 plt.legend()
-
+plt.xlabel('indice de la mesure')
+plt.ylabel('amplitude d\'ECG')
 plt.tight_layout()
 plt.show()
 
-
-
-
-def bartlett_estimator(signal, min_period, max_period):
-    """Calcule les coefficients de corrélation selon l'estimateur de Bartlett."""
-    autocorr=[]
-    for k in range(min_period,max_period):
-        autocorr.append(np.sum(signal[k:]*signal[:-k])/(len(signal)-k))
-    return (np.arange(min_period,max_period),np.array(autocorr))
-
-def bt_estimator(signal, min_period, max_period):
-    """Calcule les coefficients de corrélation selon l'estimateur de Bartlett."""
-    autocorr=[]
-    for k in range(min_period,max_period):
-        autocorr.append(np.sum(signal[k:]*signal[:-k])/(len(signal)))
-    return (np.arange(min_period,max_period),np.array(autocorr))
-
-def are_close(A,B):
-    return np.sum([np.min([np.abs(a-b) for b in B]) for a in A])/np.sqrt(len(A)*len(B))
-
-
-print(f'frequence de la mere: {mhr} bpm')
-print(f'frequence du foetus: {fhr} bpm')
+#recherche des complexes QRS 
+print(f'frequence réelle de la mere: {mhr} bpm')
+print(f'frequence réelle du foetus: {fhr} bpm')
 list_peaks=[]
 
 for i in range(n_pca):
+    #recherche des pics de l'autocorrélation
     current_signal = signals_pca[:,i].T/signals_pca[:,i].T[np.argmax(np.abs(signals_pca[:,i].T))]
-    x,autocorr = bt_estimator(current_signal, min_period, max_period)
+    x,autocorr = bartlett_estimator(current_signal, min_period, max_period)
     peaks_autocorr, _ = find_peaks(autocorr, prominence=np.max(autocorr)*0.5)
     if len(peaks_autocorr)==0:
         peaks_autocorr=[np.argmax(autocorr)]
     period_main = x[peaks_autocorr[0]]
+    print(f'frequence estimée de la composante n° {i+1}: {1/((period_main/f_ech)/60)} bpm')
+    
+    #recherche des pics sur la composante principale avec la fréquence associée à l'autocorrélation
+    peaks_signal, _ = find_peaks(current_signal, distance = int(period_main*0.8), prominence=np.max(np.abs(current_signal))*0.45)
+    if len(peaks_signal)==0:
+        peaks_signal = find_peaks(current_signal, distance = int(period_main*0.8))
+    list_peaks.append(peaks_signal)
+
+    # plot des pics de l'autocorrelation
     plt.figure(2)
     plt.subplot(n_pca,1,i+1)
     plt.plot(x, autocorr, color='blue',label = f'autocorrélation du composant n°{i+1}')
     plt.scatter(x[peaks_autocorr], autocorr[peaks_autocorr], color='green', label = f'pic du composant n°{i+1}', marker = 'o')
+    plt.xlabel('Ordre d\'autocorrelation')
+    plt.ylabel(f"Autocorrelation")
     plt.legend()
-    print(f'frequence a priori de la composante n° {i+1}: {1/((period_main/f_ech)/60)} bpm')
+    
 
-    peaks_signal, _ = find_peaks(current_signal, distance = int(period_main*0.8), prominence=0.45)
-    list_peaks.append(peaks_signal)
-
-    #composantes principales
+    # indices des pics reportés sur les composantes principales
     plt.figure(1)
     plt.subplot(n_pca,1,i+1)
     plt.plot(current_signal, label=f"composant principal n: "+str(i), color='b')
-    plt.scatter(peaks_signal, current_signal[peaks_signal], label=f"composant principal n: "+str(i),  marker='+', color='r')
+    plt.scatter(peaks_signal, current_signal[peaks_signal], label=f"pics détectés",  marker='+', color='r')
     plt.legend()
-
-
+    plt.xlabel('indice de la mesure')
+    plt.ylabel('amplitude')
 plt.tight_layout()
 plt.show()
 
-
-d01 = are_close(list_peaks[0],list_peaks[1])
-d02 = are_close(list_peaks[0],list_peaks[2])
-d12 = are_close(list_peaks[0],list_peaks[2])
-
+#on suppose qu'un superviseur est capable de reperer quelle composante
+#de la pca est redondante
+_,_,s1  = classif_report(list_peaks[1],qrs_f, margin_f, f_ech)
+_,_,s2  = classif_report(list_peaks[2],qrs_f, margin_f, f_ech)
 found_ecg_m = list_peaks[0]
-if d01>d12: 
+if s1 > s2:
     found_ecg_f = list_peaks[1]
-    print('took component 2')
 else:
-    if d02>d01:
-        found_ecg_f = list_peaks[2]
-        print('took component 3')
-    else:
-        found_ecg_f = list_peaks[1]
-        print('took component 2')
+    found_ecg_f = list_peaks[2]   
+print(f'sensitivity, ppv, f1-score mere: {classif_report(found_ecg_m,qrs_m, margin_m, f_ech)}')
+print(f'sensitivity, ppv, f1-score foetus: {classif_report(found_ecg_f,qrs_f, margin_f, f_ech)}')
 
+
+# comparaison des complexes QRS trouvés et réels
 interesting_channels=[0, 2, 5, 16, 33, 1, 7, 24, 29, 14]
 for c in interesting_channels:
-    plt.plot(signals_matrix[c],label='signal d origine', color='black', alpha=0.6/len(interesting_channels))
-
-plt.vlines(found_ecg_m, 0, signals_matrix[i,:][found_ecg_m], label=f"pics n: "+str(i), linewidth=1, color='black')
-plt.vlines(found_ecg_f, 0, signals_matrix[i,:][found_ecg_f], label=f"pics n: "+str(i), linewidth=1, color='black')
+    plt.plot(signals_matrix[c],label=f'signal de la sonde {c}', color='black', alpha=0.6/len(interesting_channels))
+plt.vlines(found_ecg_m, 0, signals_matrix[i,:][found_ecg_m], label=f"pics trouvés mere", linewidth=1, color='black')
+plt.vlines(found_ecg_f, 0, signals_matrix[i,:][found_ecg_f], label=f"pics trouvés foetus", linewidth=1, color='black')
 plt.vlines(qrs_m, 0, signals_matrix[i, qrs_m], color='red', linewidth=1, label='pics réels mere', linestyles='--')
 plt.vlines(qrs_f, 0, signals_matrix[i, qrs_f], color='blue', linewidth=1, label='pics réels foetus', linestyles='--')
+plt.xlabel('indice de la mesure')
+plt.ylabel('amplitude d\'ECG')
+plt.title('Reconstruction des complexes QRS')
 plt.legend()
 plt.show()
 
-
-def classif_report(predicted, real, margin, sr):
-    tolerance = int(margin * sr)
-    fp = 0
-    tp = 0
-    fn = 0
-    for p in predicted:
-        if np.min([np.abs(p-r) for r in real])<=tolerance:
-            tp+=1
-        else:
-            fp+=1
-    for r in real:
-        if np.min([np.abs(p-r) for p in predicted])>tolerance:
-            fn += 1
-    sensitivity = tp/(fn + tp)
-    positive_predictive_value = tp/(fp + tp)
-    f1_score = 2*(positive_predictive_value * sensitivity)/(positive_predictive_value + sensitivity)
-    return sensitivity, positive_predictive_value, f1_score
-
-
-margin_m = 0.15 #s
-margin_f = 0.05 #s
-print(classif_report(found_ecg_m,qrs_m, margin_m, f_ech))
-print(classif_report(found_ecg_f,qrs_f, margin_f, f_ech))

@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import struct
-from sklearn.decomposition import FastICA
+from sklearn.decomposition import PCA
 from scipy.signal import find_peaks
 import wfdb
 import re
@@ -80,26 +80,13 @@ def extract_hr(xx, yy, z, ww, vvvv):
             return (fhr_match.group(1), mhr_match.group(1))
         else:
             return (0,0)
-        
-
 
 def bartlett_estimator(signal, min_period, max_period):
     """Calcule les coefficients de corrélation selon l'estimateur de Bartlett."""
     autocorr=[]
     for k in range(min_period,max_period):
-        autocorr.append(np.sum(signal[k:]*signal[:-k])/(len(signal)-k))
-    return (np.arange(min_period,max_period),np.array(autocorr))
-
-def bt_estimator(signal, min_period, max_period):
-    """Calcule les coefficients de corrélation selon l'estimateur de Bartlett."""
-    autocorr=[]
-    for k in range(min_period,max_period):
         autocorr.append(np.sum(signal[k:]*signal[:-k])/(len(signal)))
     return (np.arange(min_period,max_period),np.array(autocorr))
-
-def are_close(A,B):
-    return np.sum([np.min([np.abs(a-b)**2 for b in B]) for a in A])/np.sqrt(len(A)*len(B))
-
 
 def classif_report(predicted, real, margin, sr):
     tolerance = int(margin * sr)
@@ -143,14 +130,15 @@ liste_positive_predictive_value_m = []
 liste_f1_score_m= []
 
 
-
-for sample in range(100):
-    XX  = f'0{np.random.randint(1,9)}'
-    YY = '09'
+#itération sur le nombre de samples pris dans la database
+for sample in range(500):
+    #choose data sample to analyze
+    XX  = f'0{np.random.randint(1,10)}'
+    YY = '03'
     Z = f'{np.random.randint(1,5)}'
-    WW = f'c{np.random.randint(1,5)}'
+    WW = f'c1'
     print('\n')
-    print(XX, Z, WW)
+    print(f'echantillon XX, Z, WW = {XX, Z, WW}')
 
 
     # Load data
@@ -179,18 +167,16 @@ for sample in range(100):
     signals_matrix = np.array(signals)
 
     # Apply PCA for BSS
-    ica = FastICA(n_components=n_pca)
-    signals_pca = ica.fit_transform(signals_matrix.T)  # Transpose to have signals as rows
+    pca = PCA(n_components=n_pca)
+    signals_pca = pca.fit_transform(signals_matrix.T)
+    reconstructed_signals = pca.inverse_transform(signals_pca).T
 
-    # Reconstruct the separated signals from the PCA components
-    reconstructed_signals = ica.inverse_transform(signals_pca).T
-
-
+    #apply autocorrelative analysis on each component
     list_peaks=[]
     list_freq = []
     for i in range(n_pca):
         current_signal = signals_pca[:,i].T/signals_pca[:,i].T[np.argmax(np.abs(signals_pca[:,i].T))]
-        x,autocorr = bt_estimator(current_signal, min_period, max_period)
+        x,autocorr = bartlett_estimator(current_signal, min_period, max_period)
         peaks_autocorr, _ = find_peaks(autocorr, prominence=np.max(autocorr)*0.5)
         if len(peaks_autocorr)==0:
             peaks_autocorr=[np.argmax(autocorr)]
@@ -204,18 +190,19 @@ for sample in range(100):
 
     #on suppose qu'un superviseur est capable de reperer quelle composante
     #de la pca est redondante
-    s1,_,_  = classif_report(list_peaks[1],qrs_f, margin_f, f_ech)
-    s2,_,_  = classif_report(list_peaks[2],qrs_f, margin_f, f_ech)
+    _,_,s1  = classif_report(list_peaks[1],qrs_f, margin_f, f_ech)
+    _,_,s2  = classif_report(list_peaks[2],qrs_f, margin_f, f_ech)
     found_ecg_m = list_peaks[0]
     if s1 > s2:
         found_ecg_f = list_peaks[1]
     else:
         found_ecg_f = list_peaks[2]
 
+    # calcul des sensibilités, ppv, f1-score
     sensitivity_m, positive_predictive_value_m ,f1_score_m = classif_report(found_ecg_m,qrs_m, margin_m, f_ech)
     sensitivity_f, positive_predictive_value_f ,f1_score_f = classif_report(found_ecg_f,qrs_f, margin_f, f_ech)
-    print(sensitivity_m, positive_predictive_value_m ,f1_score_m)
-    print(sensitivity_f, positive_predictive_value_f ,f1_score_f)
+    print(f'S, ppv, f1-score : {sensitivity_m, positive_predictive_value_m ,f1_score_m}')
+    print(f'S, ppv, f1-score : {sensitivity_f, positive_predictive_value_f ,f1_score_f}')
 
     liste_sensitivity_m.append(sensitivity_m)
     liste_positive_predictive_value_m.append(positive_predictive_value_m)
