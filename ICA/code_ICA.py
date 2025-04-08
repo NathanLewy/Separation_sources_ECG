@@ -53,7 +53,7 @@ def extract_signal(xx, yy, z, ww, vvvv):
         filename = 'sub'+xx+'_snr'+yy+'dB_l'+z+'_'+ww+'_'+vvvv
     filename = filename + '.dat'
     # Set working directory
-    os.chdir('/home/pierres/ST7/fetal-ecg-synthetic-database-1.0.0' + '/sub'+xx+'/snr'+yy+'dB')
+    os.chdir('D:\\datacset_ecg\\fetal-ecg-synthetic-database-1.0.0' + '\\sub'+xx+'\\snr'+yy+'dB')
     # Load data
     filepath = os.getcwd()+'/'+filename
     data = np.fromfile(filepath, dtype=np.int16)
@@ -105,9 +105,9 @@ def signal(XX,YY,Z,WW,vvvv):
     #plot results
     plt.figure()
     plt.subplot(4,1,2)
-    plt.plot(abs(S_[0]))
+    plt.plot(S_[0])
     plt.plot(peaks1, S_[0][peaks1], "x")
-    plt.plot(abs(S_[1]))    
+    plt.plot(S_[1])    
     plt.title("le cas " + str(dico[XX]) + " de bpm et " + str(YY) + " de bruit")
     plt.plot(peaks2, S_[1][peaks2], "o")
 
@@ -128,7 +128,7 @@ vvvv = 'fecg1' #on laisse un seul foetus pour l'instant
 signal(XX,YY,Z,WW,vvvv)
 
 
-XX  = '03' # mettre à 07
+XX  = '07' # mettre à 07
 YY = '12'
 Z = '1'
 WW = 'c1'
@@ -137,7 +137,7 @@ vvvv = 'fecg1' #on laisse un seul foetus pour l'instant
 signal(XX,YY,Z,WW,vvvv)
 
 
-XX  = '03' # mettre à 01
+XX  = '01' # mettre à 01
 YY = '12'
 Z = '1'
 WW = 'c1'
