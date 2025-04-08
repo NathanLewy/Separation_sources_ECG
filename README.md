@@ -51,8 +51,8 @@ PCA_Autocorrelation/
      - Additional PDFs for demos and related studies.
 
 5. **Slides and Handout**:
-   - slides_soutenance.pdf: A presentation summarizing the project and its results.
-   - CR.pdf: A more formal presentation of the underlying tools and methods used throughout the project.
+   - slides_soutenance.pdf: The slides used in the final presentation, summarizing the project and its results.
+   - CR.pdf: A more formal presentation of the underlying mathematical tools and methods used throughout the project.
 
 ---
 
