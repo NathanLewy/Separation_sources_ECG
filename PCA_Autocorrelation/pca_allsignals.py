@@ -163,7 +163,7 @@ for sample in range(500):
     qrs_f = [int(i-T0*f_ech) for i in qrs_f if T0 < i/f_ech < T + T0]
     for i in range(N_signaux):
         signal_i = data[i::34][:N_ech]
-        signals.append((signal_i-np.mean(signal_i))/np.std(signal_i,ddof=1))
+        signals.append(signal_i-np.mean(signal_i))
     signals_matrix = np.array(signals)
 
     # Apply PCA for BSS
